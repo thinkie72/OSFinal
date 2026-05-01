@@ -25,7 +25,7 @@ typedef struct {
 } SHOT_DATA, *PSHOT_DATA;
 
 typedef struct {
-    *char player_name;
+    char *player_name;
     PSHOT_DATA player_data;
     float impact;
     float usage;
@@ -34,7 +34,7 @@ typedef struct {
 } STAR_PLAYER, *PSTAR_PLAYER;
 
 typedef struct {
-    *char team_name;
+    char *team_name;
     PSTAR_PLAYER player;
     PSHOT_DATA team_data;
     // image logo;
