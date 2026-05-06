@@ -1,0 +1,14 @@
+# Build output (CMake out-of-source build directory)
+build/
+cmake-build-*/
+
+# CLion / IDE
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Logo PNGs (copyrighted, sourced locally)
+logos/*.png
+!logos/README.txt
