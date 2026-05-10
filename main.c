@@ -140,17 +140,110 @@ static void filename_from_team_name(const char *name, char *out, int outlen) {
     out[j]   = '\0';
 }
 
+// Load a logo PNG, infer its background color from the top-left pixel,
+// replace anything close to that color with transparent, then crop to the
+// true bounding box of the remaining content. Screenshot has a white border?
+// Gone. Transparent PNG with extra padding? Cropped tight. Either way the
+// final texture is the logo edge-to-edge and the existing fit-and-center
+// code in draw_team_grid() puts it in the middle of the tile.
+static Texture2D load_logo_processed(const char *path, int *ok_out) {
+    *ok_out = 0;
+    Texture2D empty = { 0 };
+    Image img = LoadImage(path);
+    if (img.data == NULL) return empty;
+
+    // Force a known pixel layout so we can poke pixels directly.
+    ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    Color *pix = (Color *)img.data;
+    const int w = img.width, h = img.height;
+    if (w <= 0 || h <= 0) { UnloadImage(img); return empty; }
+
+    // Background reference = top-left pixel. Good enough for screenshots
+    // with a uniform border and for transparent-bg PNGs alike.
+    const Color bg = pix[0];
+    const int bg_transparent = (bg.a < 16);
+
+    int min_x = w, min_y = h, max_x = -1, max_y = -1;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            const int idx = y * w + x;
+            Color p = pix[idx];
+            int is_bg;
+            if (bg_transparent) {
+                is_bg = (p.a < 16);
+            } else {
+                int dr = (int)p.r - (int)bg.r; if (dr < 0) dr = -dr;
+                int dg = (int)p.g - (int)bg.g; if (dg < 0) dg = -dg;
+                int db = (int)p.b - (int)bg.b; if (db < 0) db = -db;
+                // Tolerance: matches near-white anti-aliased edges too.
+                is_bg = (dr + dg + db < 60);
+            }
+            if (is_bg) {
+                pix[idx] = (Color){ 0, 0, 0, 0 };
+            } else {
+                if (x < min_x) min_x = x;
+                if (x > max_x) max_x = x;
+                if (y < min_y) min_y = y;
+                if (y > max_y) max_y = y;
+            }
+        }
+    }
+
+    if (max_x < 0) {
+        // Whole image read as background — give up on trimming and use as-is.
+        Texture2D tex = LoadTextureFromImage(img);
+        SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+        UnloadImage(img);
+        *ok_out = 1;
+        return tex;
+    }
+
+    // Small pad so we don't clip anti-aliased edges.
+    const int pad = 2;
+    min_x = (min_x - pad < 0) ? 0 : min_x - pad;
+    min_y = (min_y - pad < 0) ? 0 : min_y - pad;
+    max_x = (max_x + pad >= w) ? w - 1 : max_x + pad;
+    max_y = (max_y + pad >= h) ? h - 1 : max_y + pad;
+
+    Rectangle crop = {
+        (float)min_x, (float)min_y,
+        (float)(max_x - min_x + 1), (float)(max_y - min_y + 1)
+    };
+    ImageCrop(&img, crop);
+
+    Texture2D tex = LoadTextureFromImage(img);
+    SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+    UnloadImage(img);
+    *ok_out = 1;
+    return tex;
+}
+
 static void load_logos(void) {
+    // Search a few likely directories so the user can drop PNGs in the
+    // source-tree logos/ and not have to re-run CMake; the binary will
+    // find them whether it was launched from build/, cmake-build-debug/,
+    // or the source root.
+    const char *dirs[] = {
+        "logos/",
+        "../logos/",
+        "../../logos/",
+        NULL
+    };
+
     for (int i = 0; i < g_team_count; i++) {
         char fname[128];
-        char path[160];
         filename_from_team_name(g_teams[i]->team_name, fname, sizeof(fname));
-        snprintf(path, sizeof(path), "logos/%s", fname);
-        if (FileExists(path)) {
-            logos[i] = LoadTexture(path);
-            logos_loaded[i] = 1;
-        } else {
-            logos_loaded[i] = 0;
+
+        logos_loaded[i] = 0;
+        for (int d = 0; dirs[d]; d++) {
+            char path[256];
+            snprintf(path, sizeof(path), "%s%s", dirs[d], fname);
+            if (FileExists(path)) {
+                int ok = 0;
+                logos[i] = load_logo_processed(path, &ok);
+                logos_loaded[i] = ok;
+                break;
+            }
         }
     }
 }
