@@ -138,6 +138,20 @@ static SimResult simulate_one(const SimJob *job, unsigned int *seed) {
                                   job->b_star_in, job->a_star_in, seed);
     }
 
+    // NBA games can't end in a tie. Run 5-minute overtime periods (≈5
+    // possessions per side at the same 100-poss-per-48-min rate) until
+    // someone leads. Capped to avoid pathological infinite loops.
+    int ot_periods = 0;
+    while (score_a == score_b && ot_periods < 10) {
+        for (int p = 0; p < 5; p++) {
+            score_a += sim_possession(job->team_a, job->team_b,
+                                      job->a_star_in, job->b_star_in, seed);
+            score_b += sim_possession(job->team_b, job->team_a,
+                                      job->b_star_in, job->a_star_in, seed);
+        }
+        ot_periods++;
+    }
+
     SimResult r;
     r.final_a  = score_a;
     r.final_b  = score_b;
